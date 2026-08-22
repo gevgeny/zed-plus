@@ -1513,6 +1513,10 @@ fn initialize_pane(
     });
 }
 
+// zed-plus: bump when the fork's own features change. Upstream's version tracks Zed, and says
+// nothing about which of these are in a given build.
+const ZED_PLUS_VERSION: &str = "0.3.0";
+
 fn open_about_window(cx: &mut App) {
     fn about_window_icon(release_channel: ReleaseChannel) -> Arc<Image> {
         let bytes = match release_channel {
@@ -1551,7 +1555,11 @@ fn open_about_window(cx: &mut App) {
             } else {
                 ""
             };
-            let message: SharedString = format!("{release_channel_name} {version} {debug}").into();
+            // zed-plus: on the headline rather than a row of its own — this window is sized to
+            // its content, and another row pushes the buttons out of it.
+            let message: SharedString =
+                format!("{release_channel_name} {version} {debug} · Plus {ZED_PLUS_VERSION}")
+                    .into();
             let commit = AppCommitSha::try_global(cx)
                 .map(|sha| sha.full())
                 .filter(|commit| !commit.is_empty())
