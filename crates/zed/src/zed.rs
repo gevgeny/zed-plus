@@ -1555,7 +1555,11 @@ fn open_about_window(cx: &mut App) {
             } else {
                 ""
             };
-            let message: SharedString = format!("{release_channel_name} {version} {debug}").into();
+            // zed-plus: on the headline rather than a row of its own — this window is sized to
+            // its content, and another row pushes the buttons out of it.
+            let message: SharedString =
+                format!("{release_channel_name} {version} {debug} · Plus {ZED_PLUS_VERSION}")
+                    .into();
             let commit = AppCommitSha::try_global(cx)
                 .map(|sha| sha.full())
                 .filter(|commit| !commit.is_empty())
@@ -1615,13 +1619,6 @@ fn open_about_window(cx: &mut App) {
                             .items_center()
                             .child(img(self.app_icon.clone()).size_16().flex_none())
                             .child(Headline::new(self.message.clone()))
-                            // zed-plus: which build of the fork this is, since the version
-                            // below it only ever describes upstream Zed.
-                            .child(
-                                Label::new(format!("Zed Plus {ZED_PLUS_VERSION}"))
-                                    .color(Color::Muted)
-                                    .size(LabelSize::Small),
-                            )
                             .when_some(self.commit.clone(), |this, commit| {
                                 this.child(
                                     Label::new("Commit")

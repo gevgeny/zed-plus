@@ -4,7 +4,7 @@
 
 **A fork of [Zed](https://github.com/zed-industries/zed) that pulls its panels out into windows of their own.**
 
-[![Based on Zed](https://img.shields.io/badge/based%20on-Zed-084CCF)](https://github.com/zed-industries/zed)
+[![Based on Zed](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgevgeny%2Fzed-plus%2Fmain%2Fcrates%2Fzed%2FCargo.toml&query=%24.package.version&label=based%20on%20Zed&prefix=v&color=084CCF)](https://github.com/zed-industries/zed)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue)](./LICENSE-GPL)
 ![Built by Claude](https://img.shields.io/badge/built%20by-Claude-D97757)
 
@@ -66,8 +66,8 @@ without an "all changes" tab sitting in your editor for the rest of the day.
 There are no prebuilt releases — build it the way you would build Zed:
 
 ```sh
-git clone https://github.com/gevgeny/zed-with-idea.git
-cd zed-with-idea
+git clone https://github.com/gevgeny/zed-plus.git
+cd zed-plus
 cargo run
 ```
 
