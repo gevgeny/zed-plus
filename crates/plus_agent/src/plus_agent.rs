@@ -18,10 +18,7 @@ use gpui::{
 };
 use sidebar::Sidebar;
 use theme::ActiveTheme as _;
-use ui::{
-    Divider, DividerColor, IconButton, Tooltip, h_flex, prelude::*,
-    utils::platform_title_bar_height, v_flex,
-};
+use ui::{IconButton, Tooltip, h_flex, prelude::*, v_flex};
 use util::ResultExt as _;
 use workspace::{MultiWorkspace, SidebarHandle as _, Workspace, dock::Dock};
 
@@ -39,11 +36,6 @@ const DEFAULT_WINDOW_SIZE: gpui::Size<Pixels> = gpui::Size {
     width: px(820.),
     height: px(820.),
 };
-
-/// Horizontal room for the traffic lights, which float over the content because the titlebar is
-/// transparent. The tab row is ours, so padding it leaves the hosted views alone — padding the
-/// window itself would have indented everything they draw.
-const TRAFFIC_LIGHT_INSET: Pixels = px(76.);
 
 /// Where the threads list sits relative to the conversation.
 #[derive(PartialEq, Clone, Copy)]
@@ -146,7 +138,9 @@ fn toggle_window(
                 titlebar: Some(TitlebarOptions {
                     title: Some("Agent".into()),
                     appears_transparent: true,
-                    traffic_light_position: Some(point(px(12.), px(12.))),
+                    // What the editor window uses, so the lights sit at the same height as its
+                    // own when the two windows are side by side.
+                    traffic_light_position: Some(point(px(9.), px(9.))),
                 }),
                 focus: true,
                 show: true,
@@ -220,7 +214,9 @@ impl PlusAgentWindow {
         // Deliberately not `register_sidebar`: that would make this instance *the* sidebar of the
         // editor window, replacing the one already there.
         let _multi_workspace_subscription =
-            cx.observe(&multi_workspace, |this, _, cx| this.follow_workspace(cx));
+            cx.observe_in(&multi_workspace, window, |this, _, window, cx| {
+                this.follow_workspace(window, cx)
+            });
         panel.update(cx, |panel, cx| panel.set_hosted(true, cx));
 
         let _panel_subscription = cx.observe(&panel, |_, _, cx| cx.notify());
@@ -247,7 +243,7 @@ impl PlusAgentWindow {
     /// Activating a thread that belongs elsewhere switches the whole editor window, and the panel
     /// belongs to a workspace — so the one this window renders has to be swapped for the new
     /// workspace's, or it would keep showing the conversation we just navigated away from.
-    fn follow_workspace(&mut self, cx: &mut Context<Self>) {
+    fn follow_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let workspace = self.multi_workspace.read(cx).workspace().clone();
         let Some(panel) = workspace.read(cx).panel::<AgentPanel>(cx) else {
             return;
@@ -255,16 +251,38 @@ impl PlusAgentWindow {
         if panel == self.panel {
             return;
         }
+        // A panel starts uninitialized and only opens a thread when the dock marks it active.
+        // Nothing does that here — this window renders it directly — so a workspace that was
+        // created rather than opened arrives with no conversation at all.
+        panel.update(cx, |panel, cx| {
+            workspace::dock::Panel::set_active(panel, true, window, cx);
+        });
         self._panel_subscription = cx.observe(&panel, |_, _, cx| cx.notify());
         self.panel = panel;
         cx.notify();
     }
 
-    /// The window's own strip: room for the traffic lights, and the one control that is ours.
+    /// Tells whichever pane sits at the window's top-left corner to leave the traffic lights
+    /// room, so this window needs no strip of its own above the two hosted headers.
+    fn sync_window_chrome(&self, cx: &mut App) {
+        let threads_lead = self.threads_side == ThreadsSide::Left;
+        self.threads.update(cx, |threads, cx| {
+            threads.set_reserves_window_chrome(threads_lead, cx);
+        });
+        self.panel.update(cx, |panel, cx| {
+            panel.set_reserves_window_chrome(!threads_lead, cx);
+        });
+    }
+
+    /// The conversation's own footer, holding the one control that is ours.
+    ///
+    /// Under the conversation rather than the window, because the threads pane already has a
+    /// bottom bar of its own and two of them at different heights read as a mistake. Built like
+    /// that one so the two line up when both are on screen.
     ///
     /// Three `IconButton`s rather than a `ToggleButtonGroup`, which always draws its labels — the
     /// icons already say left, right and closed.
-    fn render_header(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let side = self.threads_side;
         let button = |id: &'static str, tooltip: &'static str, icon, which| {
             IconButton::new(id, icon)
@@ -277,43 +295,38 @@ impl PlusAgentWindow {
                 }))
         };
 
+        let colors = cx.theme().colors();
+
         h_flex()
             .flex_none()
-            .w_full()
-            // The same height the editor window's title bar computes for itself, so the two line
-            // up when the windows sit side by side. The seam below is a sibling rather than a
-            // border, which would be drawn inside this height and leave the band a pixel short.
-            .h(platform_title_bar_height(window))
-            .bg(cx.theme().colors().title_bar_background)
-            .pl(TRAFFIC_LIGHT_INSET)
-            .pr_2()
+            .p_1()
+            .gap_1()
             .justify_end()
-            .child(
-                h_flex()
-                    .gap_px()
-                    .p_px()
-                    .rounded_sm()
-                    .border_1()
-                    .border_color(cx.theme().colors().border)
-                    .child(button(
-                        "plus-agent-threads-left",
-                        "Threads Left",
-                        IconName::ThreadsSidebarLeftOpen,
-                        ThreadsSide::Left,
-                    ))
-                    .child(button(
-                        "plus-agent-threads-hidden",
-                        "Hide Threads",
-                        IconName::ThreadsSidebarLeftClosed,
-                        ThreadsSide::Hidden,
-                    ))
-                    .child(button(
-                        "plus-agent-threads-right",
-                        "Threads Right",
-                        IconName::ThreadsSidebarRightOpen,
-                        ThreadsSide::Right,
-                    )),
-            )
+            .border_t_1()
+            .border_color(colors.border)
+            // What `Sidebar` blends for its own background, so this strip and the threads pane's
+            // bottom bar read as one band rather than two shades.
+            .bg(colors
+                .title_bar_background
+                .blend(colors.panel_background.opacity(0.25)))
+            .child(button(
+                "plus-agent-threads-left",
+                "Threads Left",
+                IconName::ThreadsSidebarLeftOpen,
+                ThreadsSide::Left,
+            ))
+            .child(button(
+                "plus-agent-threads-hidden",
+                "Hide Threads",
+                IconName::ThreadsSidebarLeftClosed,
+                ThreadsSide::Hidden,
+            ))
+            .child(button(
+                "plus-agent-threads-right",
+                "Threads Right",
+                IconName::ThreadsSidebarRightOpen,
+                ThreadsSide::Right,
+            ))
     }
 
     /// The draggable seam between the two panes: a one-pixel line with a wider invisible handle
@@ -322,17 +335,27 @@ impl PlusAgentWindow {
     ///
     /// It drives the sidebar's own width rather than a width of ours, since the sidebar draws
     /// itself at whatever it was last set to.
+    ///
+    /// Both the line and the handle are absolute, so the seam occupies no width in the row.
+    /// `Sidebar` draws a border down one of its own edges, and which edge comes from a setting
+    /// describing the editor window — so it lands on this seam or on the window's outer edge
+    /// depending on the setting and which side the pane is on. Taking no space means our line
+    /// covers theirs exactly when they coincide, instead of adding a second pixel beside it.
     fn render_divider(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let from_left = self.threads_side == ThreadsSide::Left;
         div()
             .relative()
-            .w_px()
+            .w(px(0.))
             .h_full()
             .flex_none()
-            // Pulled one pixel over the threads pane: `Sidebar` draws a border down its own inner
-            // edge, so a divider placed beside it reads as a two-pixel seam. Ours covers it.
-            .map(|this| if from_left { this.ml(px(-1.)) } else { this.mr(px(-1.)) })
-            .bg(cx.theme().colors().border)
+            .child(
+                div()
+                    .absolute()
+                    .left(px(-1.))
+                    .w_px()
+                    .h_full()
+                    .bg(cx.theme().colors().border),
+            )
             .child(
                 div()
                     .id("plus-agent-divider")
@@ -364,17 +387,20 @@ impl PlusAgentWindow {
 }
 
 impl Render for PlusAgentWindow {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let threads = self.threads.clone();
-        let panel = div().flex_1().min_w_0().h_full().child(self.panel.clone());
+        let panel = v_flex()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .child(div().flex_1().min_h_0().child(self.panel.clone()))
+            .child(self.render_footer(cx));
+
+        self.sync_window_chrome(cx);
 
         v_flex()
             .size_full()
             .bg(cx.theme().colors().background)
-            .child(self.render_header(window, cx))
-            // `Border`, not the default `BorderVariant`: the faded variant does not read
-            // against the title bar background, where the editor window's seam plainly does.
-            .child(Divider::horizontal().color(DividerColor::Border))
             .child(h_flex().flex_1().min_h_0().map(|this| {
                 match self.threads_side {
                     ThreadsSide::Hidden => this.child(panel),

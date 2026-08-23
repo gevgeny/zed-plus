@@ -80,8 +80,13 @@ const DEFAULT_LIST_HEIGHT: Pixels = px(280.);
 const MIN_LIST_HEIGHT: Pixels = px(120.);
 const MAX_LIST_HEIGHT: Pixels = px(900.);
 
-/// How many rows the commit box holds.
+/// How many rows the commit box holds. Roughly what the agent window's compose box rests at, so
+/// the two windows' bottom halves are the same depth.
 const COMMIT_LINES: usize = 5;
+
+/// The commit row's buttons. `Medium` is 28px, which with `p_1` around it gives a strip about as
+/// deep as the row of controls under the agent window's compose box.
+const BUTTON_SIZE: ButtonSize = ButtonSize::Medium;
 
 /// Carried by a divider drag. Empty because the size is read from the event position, not
 /// accumulated — a drag that starts mid-gesture still lands where the pointer is.
@@ -1171,19 +1176,22 @@ impl PlusGitWindow {
         let commit_menu = self.render_commit_menu(cx).into_any_element();
         let this = cx.entity();
 
+        let colors = cx.theme().colors();
+
         Some(
             v_flex()
                 .w_full()
                 .flex_none()
-                .gap_1p5()
-                .pb_2()
+                // The seam above the message box, matching the one over the agent window's
+                // compose area.
+                .border_t_1()
+                .border_color(colors.border)
                 .children(self.commit_editor.clone().map(|editor| {
                     div()
                         .key_context("CommitEditor")
                         .w_full()
-                        .px_2()
-                        .pt_2()
-                        .bg(cx.theme().colors().editor_background)
+                        .p_2()
+                        .bg(colors.editor_background)
                         .child(editor)
                 }))
                 .child(
@@ -1191,7 +1199,14 @@ impl PlusGitWindow {
                         .w_full()
                         .flex_none()
                         .gap_1()
-                        .px_2()
+                        .p_1()
+                        .border_t_1()
+                        .border_color(colors.border)
+                        // What `Sidebar` blends for its background, so this strip matches the
+                        // agent window's footer.
+                        .bg(colors
+                            .title_bar_background
+                            .blend(colors.panel_background.opacity(0.25)))
                         .child(div().flex_1())
                         .child(
                             action_button(
@@ -1887,15 +1902,15 @@ fn commit_message_editor(
 /// across both halves, so it takes `Transparent` to avoid painting twice.
 fn action_button(base: ButtonLike, label: &str, enabled: bool, style: ButtonStyle) -> ButtonLike {
     base.style(style)
-        .size(ButtonSize::Large)
+        .size(BUTTON_SIZE)
         .disabled(!enabled)
         .child(Label::new(label.to_string()))
 }
 
 /// The chevron half of a split button. Ported from `git_ui`, where it is crate-private.
 fn split_button_chevron(id: &'static str, menu_open: bool) -> ButtonLike {
-    // Square, and the same height as `ButtonSize::Large`, so the two halves match.
-    let size = ui::rems_from_px(32.);
+    // Square, and the same height as the buttons beside it, so the two halves match.
+    let size = BUTTON_SIZE.rems();
     ButtonLike::new_rounded_right(id)
         .style(ButtonStyle::Transparent)
         .selected_style(ButtonStyle::Tinted(ui::TintColor::Accent))
