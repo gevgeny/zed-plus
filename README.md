@@ -44,8 +44,8 @@ dock next to it. Activating a thread from another worktree switches the editor t
 window with it.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-dark.png">
-  <img alt="Three windows side by side: git changes on the left, the editor and project tree in the middle, the agent and its threads on the right" src="docs/screenshots/overview-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/agent-window-dark.png">
+  <img alt="The agent window: threads list on the left, the open conversation and its compose box on the right" src="docs/screenshots/agent-window-light.png">
 </picture>
 
 ## Git window
@@ -58,7 +58,7 @@ without an "all changes" tab sitting in your editor for the rest of the day.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/git-window-dark.png">
-  <img alt="The git window open over the editor, showing the changed-file tree, a file's diff and the commit box" src="docs/screenshots/git-window-light.png">
+  <img alt="The git window: changed files as a tree on the left, the selected file's diff on the right, the commit box below" src="docs/screenshots/git-window-light.png">
 </picture>
 
 ## Building
