@@ -952,8 +952,13 @@ impl Sidebar {
     // zed-plus: marks this sidebar as rendered outside the editor window, by the agent window.
     // Revealing the panel from there would open the dock over whatever the user had in it, and
     // the sidebar's own toggle acts on a sidebar that window does not have.
-    pub fn set_hosted(&mut self, hosted: bool) {
+    pub fn set_hosted(&mut self, hosted: bool, cx: &mut Context<Self>) {
+        if self.hosted == hosted {
+            return;
+        }
         self.hosted = hosted;
+        self.sync_archive_window_chrome(cx);
+        cx.notify();
     }
 
     // zed-plus: tells a hosted sidebar whether it is the thing in its window's top-left corner,
@@ -964,7 +969,20 @@ impl Sidebar {
             return;
         }
         self.reserves_window_chrome = reserves;
+        self.sync_archive_window_chrome(cx);
         cx.notify();
+    }
+
+    /// The archive stands in for this sidebar's header while it is showing, so it has to be told
+    /// the same thing.
+    fn sync_archive_window_chrome(&self, cx: &mut Context<Self>) {
+        let SidebarView::Archive(archive) = &self.view else {
+            return;
+        };
+        let (hosted, reserves) = (self.hosted, self.reserves_window_chrome);
+        archive.update(cx, |archive, cx| {
+            archive.set_window_chrome(hosted, reserves, cx);
+        });
     }
 
     /// What to do with the panel's dock, given what a sidebar in its own window would do.
@@ -7514,18 +7532,31 @@ impl Sidebar {
         let workspace_handle = active_workspace.downgrade();
         let multi_workspace = self.multi_workspace.clone();
 
-        active_workspace.update(cx, |workspace, cx| {
-            workspace.toggle_modal(window, cx, |window, cx| {
-                ThreadImportModal::new(
-                    agent_server_store,
-                    agent_registry_store,
-                    workspace_handle.clone(),
-                    multi_workspace.clone(),
-                    window,
-                    cx,
-                )
-            });
-        });
+        // zed-plus: a workspace modal is rendered by the window that renders the workspace, so
+        // opening one against another window leaves it invisible while that window believes a
+        // modal has focus — every later click lands on nothing.
+        let Some(editor_window) = active_workspace
+            .read(cx)
+            .multi_workspace_window(window, cx)
+        else {
+            return;
+        };
+        editor_window
+            .update(cx, |_, window, cx| {
+                active_workspace.update(cx, |workspace, cx| {
+                    workspace.toggle_modal(window, cx, |window, cx| {
+                        ThreadImportModal::new(
+                            agent_server_store,
+                            agent_registry_store,
+                            workspace_handle.clone(),
+                            multi_workspace.clone(),
+                            window,
+                            cx,
+                        )
+                    });
+                });
+            })
+            .log_err();
     }
 
     fn should_render_acp_import_onboarding(&self, cx: &App) -> bool {
@@ -7661,7 +7692,7 @@ impl Sidebar {
 
         let agent_connection_store = agent_panel.read(cx).connection_store().downgrade();
 
-        let hosted = self.hosted;
+        let (hosted, reserves) = (self.hosted, self.reserves_window_chrome);
         let archive_view = cx.new(|cx| {
             let mut view = ThreadsArchiveView::new(
                 active_workspace.downgrade(),
@@ -7671,7 +7702,7 @@ impl Sidebar {
                 cx,
             );
             // zed-plus: the archive replaces this sidebar in place, so it inherits its host.
-            view.set_hosted(hosted);
+            view.set_window_chrome(hosted, reserves, cx);
             view
         });
 

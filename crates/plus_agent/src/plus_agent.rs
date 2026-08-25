@@ -200,7 +200,7 @@ impl PlusAgentWindow {
             let mut sidebar = Sidebar::new(multi_workspace.clone(), window, cx);
             // Rendered outside the editor window: no dock to reveal, and no sidebar of its own
             // to toggle.
-            sidebar.set_hosted(true);
+            sidebar.set_hosted(true, cx);
             sidebar
         });
 
@@ -227,7 +227,7 @@ impl PlusAgentWindow {
                 window.remove_window();
             });
 
-        Self {
+        let this = Self {
             multi_workspace,
             panel,
             threads,
@@ -235,7 +235,9 @@ impl PlusAgentWindow {
             _panel_subscription,
             _multi_workspace_subscription,
             _editor_window_subscription,
-        }
+        };
+        this.sync_window_chrome(cx);
+        this
     }
 
     /// Follows the editor window from one workspace to another.
@@ -291,6 +293,7 @@ impl PlusAgentWindow {
                 .tooltip(Tooltip::text(tooltip))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.threads_side = which;
+                    this.sync_window_chrome(cx);
                     cx.notify();
                 }))
         };
@@ -395,8 +398,6 @@ impl Render for PlusAgentWindow {
             .h_full()
             .child(div().flex_1().min_h_0().child(self.panel.clone()))
             .child(self.render_footer(cx));
-
-        self.sync_window_chrome(cx);
 
         v_flex()
             .size_full()

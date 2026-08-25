@@ -6094,7 +6094,7 @@ impl AgentPanel {
         };
 
         // zed-plus: fullscreen hides the traffic lights, so the room is only needed out of it.
-        let reserves_window_chrome =
+        let reserve_chrome =
             self.reserves_window_chrome && cfg!(target_os = "macos") && !window.is_fullscreen();
         let is_full_screen = self.is_zoomed(window, cx);
         let (icon_name, tooltip_text) = if is_full_screen {
@@ -6167,13 +6167,13 @@ impl AgentPanel {
                         // zed-plus: room for the traffic lights when this toolbar is the window's
                         // top row, the way `Sidebar`'s header does it.
                         .map(|this| {
-                            if reserves_window_chrome {
+                            if reserve_chrome {
                                 this.pl(px(ui::utils::TRAFFIC_LIGHT_PADDING))
                             } else {
                                 this.pl(DynamicSpacing::Base04.rems(cx))
                             }
                         })
-                        .when(reserves_window_chrome, |this| {
+                        .when(reserve_chrome, |this| {
                             this.child(ui::Divider::vertical().color(ui::DividerColor::Border))
                         })
                         .child(selected_agent.into_any_element())
