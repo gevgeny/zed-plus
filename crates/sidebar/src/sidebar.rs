@@ -805,6 +805,9 @@ pub struct Sidebar {
     // zed-plus: hides the controls that only work inside a workspace window, and stops thread
     // activation from opening the dock, for the agent window that renders this sidebar.
     hosted: bool,
+    // zed-plus: whether this sidebar is the thing in its window's top-left corner, and so has to
+    // leave room for the traffic lights. Only consulted when hosted.
+    reserves_window_chrome: bool,
 }
 
 impl Sidebar {
@@ -937,6 +940,7 @@ impl Sidebar {
             import_banners_use_verbose_labels: None,
             cross_channel_import_channels: Vec::new(),
             hosted: false,
+            reserves_window_chrome: false,
         };
 
         // zed-plus: the agent window builds a sidebar after startup, which misses the events
@@ -948,8 +952,37 @@ impl Sidebar {
     // zed-plus: marks this sidebar as rendered outside the editor window, by the agent window.
     // Revealing the panel from there would open the dock over whatever the user had in it, and
     // the sidebar's own toggle acts on a sidebar that window does not have.
-    pub fn set_hosted(&mut self, hosted: bool) {
+    pub fn set_hosted(&mut self, hosted: bool, cx: &mut Context<Self>) {
+        if self.hosted == hosted {
+            return;
+        }
         self.hosted = hosted;
+        self.sync_archive_window_chrome(cx);
+        cx.notify();
+    }
+
+    // zed-plus: tells a hosted sidebar whether it is the thing in its window's top-left corner,
+    // and so has to leave the traffic lights room. The host knows; the `sidebar_side` setting
+    // describes the editor window and cannot answer for this one.
+    pub fn set_reserves_window_chrome(&mut self, reserves: bool, cx: &mut Context<Self>) {
+        if self.reserves_window_chrome == reserves {
+            return;
+        }
+        self.reserves_window_chrome = reserves;
+        self.sync_archive_window_chrome(cx);
+        cx.notify();
+    }
+
+    /// The archive stands in for this sidebar's header while it is showing, so it has to be told
+    /// the same thing.
+    fn sync_archive_window_chrome(&self, cx: &mut Context<Self>) {
+        let SidebarView::Archive(archive) = &self.view else {
+            return;
+        };
+        let (hosted, reserves) = (self.hosted, self.reserves_window_chrome);
+        archive.update(cx, |archive, cx| {
+            archive.set_window_chrome(hosted, reserves, cx);
+        });
     }
 
     /// What to do with the panel's dock, given what a sidebar in its own window would do.
@@ -7280,14 +7313,20 @@ impl Sidebar {
         let has_query = self.has_filter_query(cx);
         let sidebar_on_left = self.side(cx) == SidebarSide::Left;
         let sidebar_on_right = self.side(cx) == SidebarSide::Right;
-        // zed-plus: `!self.hosted` — the agent window draws its own titlebar strip, so this
-        // header must not also reserve room for the traffic lights or the window controls.
-        let owns_window_chrome = !window.is_fullscreen() && !self.hosted;
-        let traffic_lights = cfg!(target_os = "macos") && owns_window_chrome && sidebar_on_left;
+        // zed-plus: a hosted sidebar is told whether it sits in the window's top-left corner —
+        // the setting below describes the editor window, not the one hosting this. Window
+        // controls stay the editor window's business either way.
+        let at_window_corner = if self.hosted {
+            self.reserves_window_chrome
+        } else {
+            sidebar_on_left
+        };
+        let not_fullscreen = !window.is_fullscreen();
+        let traffic_lights = cfg!(target_os = "macos") && not_fullscreen && at_window_corner;
         let left_window_controls =
-            !cfg!(target_os = "macos") && owns_window_chrome && sidebar_on_left;
+            !cfg!(target_os = "macos") && not_fullscreen && !self.hosted && sidebar_on_left;
         let right_window_controls =
-            !cfg!(target_os = "macos") && owns_window_chrome && sidebar_on_right;
+            !cfg!(target_os = "macos") && not_fullscreen && !self.hosted && sidebar_on_right;
         let header_height = platform_title_bar_height(window);
 
         h_flex()
@@ -7493,18 +7532,31 @@ impl Sidebar {
         let workspace_handle = active_workspace.downgrade();
         let multi_workspace = self.multi_workspace.clone();
 
-        active_workspace.update(cx, |workspace, cx| {
-            workspace.toggle_modal(window, cx, |window, cx| {
-                ThreadImportModal::new(
-                    agent_server_store,
-                    agent_registry_store,
-                    workspace_handle.clone(),
-                    multi_workspace.clone(),
-                    window,
-                    cx,
-                )
-            });
-        });
+        // zed-plus: a workspace modal is rendered by the window that renders the workspace, so
+        // opening one against another window leaves it invisible while that window believes a
+        // modal has focus — every later click lands on nothing.
+        let Some(editor_window) = active_workspace
+            .read(cx)
+            .multi_workspace_window(window, cx)
+        else {
+            return;
+        };
+        editor_window
+            .update(cx, |_, window, cx| {
+                active_workspace.update(cx, |workspace, cx| {
+                    workspace.toggle_modal(window, cx, |window, cx| {
+                        ThreadImportModal::new(
+                            agent_server_store,
+                            agent_registry_store,
+                            workspace_handle.clone(),
+                            multi_workspace.clone(),
+                            window,
+                            cx,
+                        )
+                    });
+                });
+            })
+            .log_err();
     }
 
     fn should_render_acp_import_onboarding(&self, cx: &App) -> bool {
@@ -7640,7 +7692,7 @@ impl Sidebar {
 
         let agent_connection_store = agent_panel.read(cx).connection_store().downgrade();
 
-        let hosted = self.hosted;
+        let (hosted, reserves) = (self.hosted, self.reserves_window_chrome);
         let archive_view = cx.new(|cx| {
             let mut view = ThreadsArchiveView::new(
                 active_workspace.downgrade(),
@@ -7650,7 +7702,7 @@ impl Sidebar {
                 cx,
             );
             // zed-plus: the archive replaces this sidebar in place, so it inherits its host.
-            view.set_hosted(hosted);
+            view.set_window_chrome(hosted, reserves, cx);
             view
         });
 

@@ -156,8 +156,10 @@ pub struct ThreadsArchiveView {
     archived_branch_names: HashMap<ThreadId, HashMap<PathBuf, String>>,
     _load_branch_names_task: Task<()>,
     thread_filter: ThreadFilter,
-    // zed-plus: stops this header reserving room for window chrome the agent window draws itself.
+    // zed-plus: the same two questions `Sidebar` answers for its own header — this view replaces
+    // that header when the archive is showing, so it has to answer them the same way.
     hosted: bool,
+    reserves_window_chrome: bool,
 }
 
 impl ThreadsArchiveView {
@@ -233,6 +235,7 @@ impl ThreadsArchiveView {
             _load_branch_names_task: Task::ready(()),
             thread_filter: ThreadFilter::All,
             hosted: false,
+            reserves_window_chrome: false,
         };
 
         this.update_items(cx);
@@ -240,9 +243,15 @@ impl ThreadsArchiveView {
         this
     }
 
-    // zed-plus: set when the sidebar showing this is itself hosted by the agent window.
-    pub fn set_hosted(&mut self, hosted: bool) {
+    // zed-plus: mirrors whatever the sidebar showing this was told, since this view stands in for
+    // its header.
+    pub fn set_window_chrome(&mut self, hosted: bool, reserves: bool, cx: &mut Context<Self>) {
+        if (self.hosted, self.reserves_window_chrome) == (hosted, reserves) {
+            return;
+        }
         self.hosted = hosted;
+        self.reserves_window_chrome = reserves;
+        cx.notify();
     }
 
     pub fn has_selection(&self) -> bool {
@@ -494,19 +503,29 @@ impl ThreadsArchiveView {
             })
             .unwrap_or_default();
 
-        workspace.update(cx, |workspace, cx| {
-            workspace.toggle_modal(window, cx, |window, cx| {
-                ProjectPickerModal::new(
-                    thread,
-                    fs,
-                    archive_view,
-                    current_workspace_id,
-                    sibling_workspace_ids,
-                    window,
-                    cx,
-                )
-            });
-        });
+        // zed-plus: a workspace modal is rendered by the window that renders the workspace, so
+        // opening one against another window leaves it invisible while that window believes a
+        // modal has focus — every later click lands on nothing.
+        let Some(editor_window) = workspace.read(cx).multi_workspace_window(window, cx) else {
+            return;
+        };
+        editor_window
+            .update(cx, |_, window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    workspace.toggle_modal(window, cx, |window, cx| {
+                        ProjectPickerModal::new(
+                            thread,
+                            fs,
+                            archive_view,
+                            current_workspace_id,
+                            sibling_workspace_ids,
+                            window,
+                            cx,
+                        )
+                    });
+                });
+            })
+            .log_err();
     }
 
     fn is_selectable_item(&self, ix: usize) -> bool {
@@ -865,13 +884,19 @@ impl ThreadsArchiveView {
             settings::SidebarSide::Left
         );
         let sidebar_on_right = !sidebar_on_left;
-        // zed-plus: `!self.hosted` — see the same block in `Sidebar::render_sidebar_header`.
-        let owns_window_chrome = !window.is_fullscreen() && !self.hosted;
-        let traffic_lights = cfg!(target_os = "macos") && owns_window_chrome && sidebar_on_left;
+        // zed-plus: the same rule as `Sidebar::render_sidebar_header`, because this view replaces
+        // that header. The setting describes the editor window; a hosted view is told directly.
+        let at_window_corner = if self.hosted {
+            self.reserves_window_chrome
+        } else {
+            sidebar_on_left
+        };
+        let not_fullscreen = !window.is_fullscreen();
+        let traffic_lights = cfg!(target_os = "macos") && not_fullscreen && at_window_corner;
         let left_window_controls =
-            !cfg!(target_os = "macos") && owns_window_chrome && sidebar_on_left;
+            !cfg!(target_os = "macos") && not_fullscreen && !self.hosted && sidebar_on_left;
         let right_window_controls =
-            !cfg!(target_os = "macos") && owns_window_chrome && sidebar_on_right;
+            !cfg!(target_os = "macos") && not_fullscreen && !self.hosted && sidebar_on_right;
         let header_height = platform_title_bar_height(window);
         let show_focus_keybinding =
             self.selection.is_some() && !self.filter_editor.focus_handle(cx).is_focused(window);

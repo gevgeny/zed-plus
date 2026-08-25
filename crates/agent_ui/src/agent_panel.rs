@@ -1189,6 +1189,9 @@ pub struct AgentPanel {
     // zed-plus: hides the controls that only work inside a workspace window, for the agent
     // window that renders this panel outside the dock.
     hosted: bool,
+    // zed-plus: whether this panel is the thing in its window's top-left corner, and so has to
+    // leave the traffic lights room in its toolbar.
+    reserves_window_chrome: bool,
 }
 
 impl AgentPanel {
@@ -1593,6 +1596,7 @@ impl AgentPanel {
             last_context_source: None,
             is_active: false,
             hosted: false,
+            reserves_window_chrome: false,
         };
 
         panel.ensure_native_agent_connection(cx);
@@ -3673,6 +3677,16 @@ impl AgentPanel {
         cx.notify();
     }
 
+    // zed-plus: tells the panel it is the thing in its window's top-left corner, so its toolbar
+    // leaves room for the traffic lights the way the sidebar's header does.
+    pub fn set_reserves_window_chrome(&mut self, reserves: bool, cx: &mut Context<Self>) {
+        if self.reserves_window_chrome == reserves {
+            return;
+        }
+        self.reserves_window_chrome = reserves;
+        cx.notify();
+    }
+
     pub fn toggle_zoom(&mut self, _: &ToggleZoom, window: &mut Window, cx: &mut Context<Self>) {
         if self.zoomed {
             cx.emit(PanelEvent::ZoomOut);
@@ -5616,6 +5630,7 @@ impl AgentPanel {
         // zed-plus: read here because the menu builder below captures no `self`.
         let hosted = self.hosted;
 
+
         PopoverMenu::new("agent-options-menu")
             .trigger_with_tooltip(
                 IconButton::new("agent-options-menu", IconName::Ellipsis)
@@ -6078,6 +6093,9 @@ impl AgentPanel {
             ToolbarMode::EmptyThread
         };
 
+        // zed-plus: fullscreen hides the traffic lights, so the room is only needed out of it.
+        let reserve_chrome =
+            self.reserves_window_chrome && cfg!(target_os = "macos") && !window.is_fullscreen();
         let is_full_screen = self.is_zoomed(window, cx);
         let (icon_name, tooltip_text) = if is_full_screen {
             (IconName::Minimize, "Disable Full Screen")
@@ -6146,7 +6164,18 @@ impl AgentPanel {
                         .min_w_0()
                         .overflow_hidden()
                         .gap(DynamicSpacing::Base04.rems(cx))
-                        .pl(DynamicSpacing::Base04.rems(cx))
+                        // zed-plus: room for the traffic lights when this toolbar is the window's
+                        // top row, the way `Sidebar`'s header does it.
+                        .map(|this| {
+                            if reserve_chrome {
+                                this.pl(px(ui::utils::TRAFFIC_LIGHT_PADDING))
+                            } else {
+                                this.pl(DynamicSpacing::Base04.rems(cx))
+                            }
+                        })
+                        .when(reserve_chrome, |this| {
+                            this.child(ui::Divider::vertical().color(ui::DividerColor::Border))
+                        })
                         .child(selected_agent.into_any_element())
                         .child(match empty_thread_title {
                             Some(title) => title,
@@ -6171,7 +6200,20 @@ impl AgentPanel {
 
         h_flex()
             .id("agent-panel-toolbar")
-            .h(Tab::container_height(cx))
+            // zed-plus: hosted beside `Sidebar`, whose header is sized as a title bar rather than
+            // as a tab row. Two different formulas disagree at any font size, so borrow theirs —
+            // including the nudge it applies for the window's decorations.
+            .map(|this| {
+                if self.hosted {
+                    this.h(ui::utils::platform_title_bar_height(window))
+                        .map(|this| match window.window_decorations() {
+                            gpui::Decorations::Client { .. } => this.mt(px(-1.)),
+                            gpui::Decorations::Server => this.mt_px().pb_px(),
+                        })
+                } else {
+                    this.h(Tab::container_height(cx))
+                }
+            })
             .flex_shrink_0()
             .max_w_full()
             .bg(cx.theme().colors().tab_bar_background)
